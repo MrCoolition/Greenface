@@ -24,6 +24,98 @@ export function projectDestination(destination, region = 'us') {
   return [offx + rho * Math.sin(theta) * scale, offy + rho * Math.cos(theta) * scale];
 }
 
+/** Visible geographic extent; the US illustration shows the contiguous states. */
+export const MAP_BOUNDS = Object.freeze({
+  us: Object.freeze({ minLat: 24, maxLat: 50, minLon: -125, maxLon: -66 }),
+  world: Object.freeze({ minLat: -90, maxLat: 90, minLon: -180, maxLon: 180 }),
+});
+
+const finiteCoordinate = value => (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) && Number.isFinite(Number(value));
+
+export function destinationFitsMap(destination, region = 'us') {
+  if (!destination || !Object.hasOwn(MAP_BOUNDS, region)) return false;
+  const latitude = destination.lat ?? destination.latitude;
+  const longitude = destination.lon ?? destination.lng ?? destination.longitude;
+  if (!finiteCoordinate(latitude) || !finiteCoordinate(longitude)) return false;
+  const { minLat, maxLat, minLon, maxLon } = MAP_BOUNDS[region];
+  return Number(latitude) >= minLat && Number(latitude) <= maxLat && Number(longitude) >= minLon && Number(longitude) <= maxLon;
+}
+
+/** Invert a point in the SVG's 1000 × 540 viewBox without rounding coordinates. */
+export function unprojectMapPoint(x, y, region = 'us') {
+  if (!finiteCoordinate(x) || !finiteCoordinate(y) || !Object.hasOwn(MAP_BOUNDS, region)) return null;
+  x = Number(x); y = Number(y);
+  if (x < 0 || x > 1000 || y < 0 || y > 540) return null;
+  let lat, lon;
+  if (region === 'world') {
+    lon = (x - 45) / 910 * 360 - 180;
+    lat = 83 - (y - 88) / 355 * 143;
+  } else {
+    const {n, c, scale, offx, offy} = US_PROJECTION;
+    const px = (x - offx) / scale, py = (y - offy) / scale;
+    const rho = Math.hypot(px, py);
+    const sineLatitude = (c - (rho * n) ** 2) / (2 * n);
+    if (sineLatitude < -1 || sineLatitude > 1) return null;
+    lat = Math.asin(sineLatitude) * 180 / Math.PI;
+    lon = Math.atan2(px, py) / n * 180 / Math.PI - 96;
+  }
+  // Floating-point inversion at ±180° / ±90° must retain boundary points.
+  const bounds = MAP_BOUNDS[region], epsilon = 1e-9;
+  if (lat < bounds.minLat - epsilon || lat > bounds.maxLat + epsilon || lon < bounds.minLon - epsilon || lon > bounds.maxLon + epsilon) return null;
+  return {
+    lat: Math.min(bounds.maxLat, Math.max(bounds.minLat, lat)),
+    lon: Math.min(bounds.maxLon, Math.max(bounds.minLon, lon)),
+  };
+}
+
+const DEFAULT_MARKER_OFFSETS = Object.freeze({
+  world: { reykjavik: [-55, -60], london: [-25, -10], paris: [0, 40], rome: [35, 10], cairo: [35, 45] },
+  us: { 'holmes-beach': [-50, 35], orlando: [20, -20] },
+});
+
+const markerDisplayName = destination => {
+  const characters = Array.from(String(destination.shortName || destination.name || 'Your place'));
+  return characters.length > 19 ? `${characters.slice(0, 18).join('')}…` : characters.join('');
+};
+
+/** Place callouts around crowded cities while retaining a leader to their real location. */
+export function layoutDestinationMarkers(destinations, region = 'us') {
+  const world = region === 'world';
+  const entries = destinations.filter(destination => world || !destination.region || destination.region === region || destination.region === 'usa');
+  const placed = [];
+  const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+  for (const destination of entries) {
+    const compact = world && entries.length > 18 && (destination.region === 'us' || destination.region === 'usa');
+    const circle = compact ? 11 : world ? 19 : 24;
+    const point = projectDestination(destination, region);
+    const name = markerDisplayName(destination);
+    const labelWidth = Math.min(154, Math.max(68, String(name).length * (world ? 5.8 : 6.2) + 23));
+    const halfWidth = compact ? circle + 7 : Math.max(circle + 7, labelWidth / 2);
+    const defaults = DEFAULT_MARKER_OFFSETS[region]?.[destination.id] || [0, 0];
+    const base = [Number(destination.mapDx ?? defaults[0]) || 0, Number(destination.mapDy ?? defaults[1]) || 0];
+    const desired = [point[0] + base[0], point[1] + base[1]];
+    const candidates = [desired, point];
+    for (const radius of [52, 78, 108, 144, 185, 230]) {
+      for (let angle = 0; angle < 12; angle++) {
+        const radians = angle * Math.PI / 6;
+        candidates.push([point[0] + Math.cos(radians) * radius, point[1] + Math.sin(radians) * radius]);
+      }
+    }
+    let best = null;
+    for (const candidate of candidates) {
+      const marker = [clamp(candidate[0], halfWidth + 12, 988 - halfWidth), clamp(candidate[1], circle + 12, 478 - circle)];
+      const box = [marker[0] - halfWidth - 4, marker[1] - circle - 11, marker[0] + halfWidth + 4, marker[1] + circle + (compact ? 11 : 54)];
+      const overlap = placed.reduce((total, other) => total + Math.max(0, Math.min(box[2], other.box[2]) - Math.max(box[0], other.box[0])) * Math.max(0, Math.min(box[3], other.box[3]) - Math.max(box[1], other.box[1])), 0);
+      const desiredDistance = (marker[0] - desired[0]) ** 2 + (marker[1] - desired[1]) ** 2;
+      const realDistance = (marker[0] - point[0]) ** 2 + (marker[1] - point[1]) ** 2;
+      const score = overlap * 100000 + desiredDistance + realDistance * .12;
+      if (!best || score < best.score) best = {destination, point, marker, box, circle, compact, labelWidth, score};
+    }
+    placed.push(best);
+  }
+  return placed;
+}
+
 const cloud = (x, y, scale = 1, opacity = .9) => `<g transform="translate(${x} ${y}) scale(${scale})" fill="#fff" opacity="${opacity}" pointer-events="none"><path d="M-29 11C-43 11-43-8-30-10C-29-31 1-34 8-17C25-25 42-9 34 6C29 15-5 11-29 11Z"/></g>`;
 const boat = (x, y, flip = 1) => `<g transform="translate(${x} ${y}) scale(${flip} 1)" pointer-events="none"><path d="M-17 7H21L13 17H-8Z" fill="#f6b97b"/><path d="M0-25V6H-15Z" fill="#fffaf1"/><path d="M3-26V3H20Z" fill="#e8a697"/><path d="M-25 23Q-17 18-9 23T7 23T23 23" fill="none" stroke="#8bc4d0" stroke-width="2.2" stroke-linecap="round"/></g>`;
 
@@ -32,12 +124,11 @@ const boat = (x, y, flip = 1) => `<g transform="translate(${x} ${y}) scale(${fli
  * Delegate click / Enter / Space to the nearest [data-destination] element.
  * Destinations use {id,name,emoji,cost,lat,lon}; arrays may already be filtered.
  */
-export function renderAdventureMap({ region = 'us', destinations = [], visited = [], balance = 0 } = {}) {
+export function renderAdventureMap({ region = 'us', destinations = [], visited = [], balance = 0, selection = null } = {}) {
   const world = region === 'world';
   const geometry = world ? WORLD : US;
   const visitedIds = new Set((Array.isArray(visited) ? visited : []).map((entry) => typeof entry === 'string' ? entry : entry.destinationId ?? entry.id));
-  const entries = destinations.filter((destination) => !destination.region || destination.region === region || (!world && destination.region === 'usa'));
-  const points = entries.map((destination) => ({destination, point: projectDestination(destination, world ? 'world' : 'us')}));
+  const points = layoutDestinationMarkers(destinations, world ? 'world' : 'us');
   const palette = world ? ['#dce9c2','#e4eccd','#d2e3b3','#d9e8ba','#e2eacb'] : ['#d9e9b9','#e4edcc','#d3e5b0','#e0ebc3','#dce9bd','#e7edce'];
   const routePoints = [...points].sort((a,b) => a.point[0] - b.point[0]);
   const route = routePoints.map(({point: [x,y]}, index) => {
@@ -46,35 +137,38 @@ export function renderAdventureMap({ region = 'us', destinations = [], visited =
     return `Q${((px+x)/2).toFixed(1)},${(Math.min(py,y)-45).toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   const countries = geometry.map(({path}, index) => `<path d="${path}" fill="${palette[index % palette.length]}" stroke="${world ? '#bfd29e' : '#f5f8e9'}" stroke-width="${world ? '.65' : '1.7'}" stroke-linejoin="round"/>`).join('');
-  const markers = points.map(({destination, point: [x, y]}, index) => {
+  const markers = points.map(({destination, point: [x, y], marker: [mx, my], circle, compact, labelWidth}) => {
     const isVisited = visitedIds.has(destination.id);
     const canAfford = balance >= Number(destination.cost || 0);
-    const name = destination.shortName || destination.name;
-    // World destinations in dense Europe have optional manual callout shifts.
-    const defaultOffset = world ? ({reykjavik: [-55, -60], london: [-25, -10], paris: [0, 40], rome: [35, 10], cairo: [35, 45]}[destination.id] || [0, 0]) : [0, 0];
-    const dx = Number(destination.mapDx ?? defaultOffset[0]), dy = Number(destination.mapDy ?? defaultOffset[1]);
-    const mx = x + dx, my = y + dy;
-    const circle = world ? 19 : 24;
+    const name = markerDisplayName(destination);
+    const fullName = String(destination.name || destination.shortName || 'Your place');
+    const dx = mx - x, dy = my - y;
     const labelY = circle + 21;
-    const labelWidth = Math.min(154, Math.max(68, String(name).length * (world ? 5.8 : 6.2) + 23));
     const costLabel = isVisited ? 'Visited ✓' : `${destination.cost} ★`;
-    return `<g class="adventure-map-marker${isVisited ? ' is-visited' : ''}${canAfford ? ' is-affordable' : ''}" data-destination="${escape(destination.id)}" role="button" tabindex="0" aria-label="${escape(name)}. ${isVisited ? 'Already visited.' : `Visit for ${destination.cost} stars.`}" transform="translate(${mx.toFixed(1)} ${my.toFixed(1)})" style="cursor:pointer;outline:none">
+    return `<g class="adventure-map-marker${compact ? ' is-compact' : ''}${isVisited ? ' is-visited' : ''}${canAfford ? ' is-affordable' : ''}" data-destination="${escape(destination.id)}" role="button" tabindex="0" aria-label="${escape(fullName)}. ${isVisited ? 'Already visited.' : `Visit for ${destination.cost} stars.`}" transform="translate(${mx.toFixed(1)} ${my.toFixed(1)})" style="cursor:pointer;outline:none">
+      <title>${escape(fullName)} · ${escape(costLabel)}</title>
       ${dx || dy ? `<g pointer-events="none" aria-hidden="true"><path d="M${-dx} ${-dy}Q${-dx * .55 + dy * .12} ${-dy * .55 - dx * .12} 0 0" fill="none" stroke="#65916c" stroke-width="1.35" stroke-linecap="round" opacity=".85"/><circle cx="${-dx}" cy="${-dy}" r="4.2" fill="#4f7a50" stroke="#fffdf6" stroke-width="1.7"/></g>` : ''}
       <circle class="marker-halo" r="${circle+7}" fill="${isVisited ? '#a7cc76' : '#fff'}" fill-opacity=".35"/>
       <circle class="marker-circle" r="${circle}" fill="${isVisited ? '#edf7d7' : '#fffdf6'}" stroke="${isVisited ? '#7eaa58' : '#9cbe87'}" stroke-width="2" filter="url(#mapPinShadow)"/>
-      <text y="${world ? 7 : 9}" text-anchor="middle" font-size="${world ? 23 : 29}" font-family="Apple Color Emoji, Segoe UI Emoji, sans-serif" pointer-events="none">${escape(destination.emoji || '📍')}</text>
+      <text y="${compact ? 5 : world ? 7 : 9}" text-anchor="middle" font-size="${compact ? 16 : world ? 23 : 29}" font-family="Apple Color Emoji, Segoe UI Emoji, sans-serif" pointer-events="none">${escape(destination.emoji || '📍')}</text>
+      <g class="map-marker-caption">
       <rect x="${-labelWidth/2}" y="${labelY-13}" width="${labelWidth}" height="23" rx="11.5" fill="#fffcf1" fill-opacity=".96"/>
       <text y="${labelY+2}" text-anchor="middle" font-size="${world ? 11 : 12}" font-family="inherit" font-weight="750" fill="#344f38" pointer-events="none">${escape(name)}</text>
       <text y="${labelY+24}" text-anchor="middle" font-size="${world ? 10 : 11}" font-family="inherit" font-weight="700" fill="${isVisited ? '#597c42' : '#587d80'}" pointer-events="none">${escape(costLabel)}</text>
+      </g>
     </g>`;
   }).join('');
+  const selectedPoint = destinationFitsMap(selection, world ? 'world' : 'us') ? projectDestination(selection, world ? 'world' : 'us') : null;
+  const selectionMarker = selectedPoint ? `<g class="map-place-selection" data-map-selection="true" transform="translate(${selectedPoint[0]} ${selectedPoint[1]})" pointer-events="none" aria-hidden="true"><circle r="29" fill="#fff9db" fill-opacity=".8" stroke="#e8a63e" stroke-width="2" stroke-dasharray="4 4"/><path d="M-37 0H-20M20 0H37M0-37V-20M0 20V37" stroke="#d58c27" stroke-width="2.5" stroke-linecap="round"/><circle r="5" fill="#d58c27" stroke="#fff" stroke-width="2"/><rect x="-47" y="38" width="94" height="25" rx="12.5" fill="#fffdf4" stroke="#e8a63e" stroke-width="1"/><text y="55" text-anchor="middle" font-size="12" font-family="inherit" font-weight="800" fill="#8d601d">Your place ✨</text></g>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" class="adventure-map-svg" viewBox="0 0 1000 540" role="group" aria-label="${world ? 'World' : 'United States'} adventure map. Select a destination to explore." style="display:block;width:100%;height:auto;background:#e8f4f3;overflow:visible;border-radius:inherit">
+    <style>.adventure-map-marker.is-compact .map-marker-caption{opacity:0;pointer-events:none}.adventure-map-marker.is-compact:hover .map-marker-caption,.adventure-map-marker.is-compact:focus .map-marker-caption{opacity:1}</style>
     <defs><filter id="mapPinShadow" x="-60%" y="-60%" width="220%" height="240%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#668c73" flood-opacity=".17"/></filter><pattern id="mapWaterDots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r=".85" fill="#bcdcd8" opacity=".45"/></pattern></defs>
     <rect width="1000" height="540" rx="16" fill="#e8f4f3"/><rect width="1000" height="540" rx="16" fill="url(#mapWaterDots)"/>
     <g pointer-events="none">${countries}</g>
     <path d="${route}" fill="none" stroke="#87ab72" stroke-width="2" stroke-dasharray="4 8" stroke-linecap="round" opacity=".68" pointer-events="none"/>
     ${world ? `<text x="210" y="276" text-anchor="middle" fill="#9bbdb9" font-size="11" font-weight="650" letter-spacing="3" pointer-events="none">PACIFIC OCEAN</text><text x="425" y="285" text-anchor="middle" fill="#9bbdb9" font-size="10" font-weight="650" letter-spacing="2" pointer-events="none">ATLANTIC</text><text x="693" y="355" text-anchor="middle" fill="#9bbdb9" font-size="10" font-weight="650" letter-spacing="2" pointer-events="none">INDIAN OCEAN</text>${cloud(135,90,.65,.75)}${cloud(445,416,.7,.8)}${cloud(825,85,.75,.7)}${boat(475,348,.65)}${boat(860,295,.75)}` : `<text x="83" y="310" text-anchor="middle" fill="#99bab5" font-size="12" font-weight="650" letter-spacing="3" transform="rotate(-70 83 310)" pointer-events="none">PACIFIC OCEAN</text><text x="917" y="342" text-anchor="middle" fill="#99bab5" font-size="12" font-weight="650" letter-spacing="3" transform="rotate(70 917 342)" pointer-events="none">ATLANTIC OCEAN</text><text x="618" y="486" text-anchor="middle" fill="#99bab5" font-size="11" font-weight="650" letter-spacing="2" pointer-events="none">GULF OF MEXICO</text>${cloud(116,88,.9,.9)}${cloud(827,67,.75,.8)}${cloud(220,442,.85,.8)}${boat(889,417)}${boat(72,389,-.8)}`}
     <g class="adventure-map-markers">${markers}</g>
+    ${selectionMarker}
     <g transform="translate(938 62)" aria-hidden="true" pointer-events="none"><circle r="23" fill="#fffdf6" fill-opacity=".85"/><path d="M0-15L6 5L0 1L-6 5Z" fill="#59845d"/><path d="M0 15L-6-5L0-1L6-5Z" fill="#b3c8a5"/><text y="-30" text-anchor="middle" fill="#7d9b85" font-size="10" font-weight="750" font-family="inherit">N</text></g>
   </svg>`;
 }

@@ -15,7 +15,7 @@ async function request(path, options = {}) {
     response = await fetch(`/api/${path}`, {
       ...options,
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'X-Greenface-Request': '1', ...options.headers },
+      headers: { 'Content-Type': 'application/json', 'X-Greenface-Request': '1', 'X-Greenface-Controls': 'pin-per-action-v1', ...options.headers },
       signal: AbortSignal.timeout(20_000),
     });
   } catch {

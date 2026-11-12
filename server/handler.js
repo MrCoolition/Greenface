@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { validateAdventureState } from '../src/lib/stateValidation.js';
+import * as adventureModel from '../src/lib/model.js';
 
 const scrypt = promisify(scryptCallback);
 const COOKIE_NAME = 'greenface_session';
@@ -171,6 +172,29 @@ function stateResponse(row) {
   return { state: row.state, revision: row.revision, familyCode: row.code };
 }
 
+// Old releases included a sample balance and sample school faces. Normalize
+// those records before returning any family data, and persist the correction
+// using the same revision lease as ordinary saves. A concurrent edit wins.
+export async function normalizeCloudRow(sql, originalRow, normalize = adventureModel.normalizeAdventureState) {
+  let row = originalRow;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const normalized = normalize(row.state);
+    if (!normalized.changed) return row;
+    validateState(normalized.state);
+    const [saved] = await sql`UPDATE greenface_families SET state = ${JSON.stringify(normalized.state)}::jsonb,
+      revision = revision + 1, updated_at = NOW()
+      WHERE id = ${row.id} AND revision = ${row.revision}
+      RETURNING id, code, state, revision`;
+    if (saved) return saved;
+    const [latest] = await sql`SELECT id, code, state, revision FROM greenface_families WHERE id = ${row.id}`;
+    if (!latest) throw new ApiError(401, 'SIGNED_OUT', 'This family adventure could not be found. Please sign in again.');
+    row = latest;
+  }
+  // A final read may already have been normalized by the competing request.
+  if (!normalize(row.state).changed) return row;
+  throw new ApiError(409, 'CONFLICT', 'Another device updated this adventure. Reload cloud progress before saving again.');
+}
+
 export async function handleRequest(request) {
   try {
     const path = new URL(request.url).pathname.replace(/\/+$/, '');
@@ -180,6 +204,12 @@ export async function handleRequest(request) {
     if (!['/api/account', '/api/state', '/api/logout'].includes(path)) throw new ApiError(404, 'NOT_FOUND', 'This Greenface route does not exist.');
     if (!config.configured) throw new ApiError(503, 'NOT_CONFIGURED', 'Cloud saving needs a Neon connection and a session secret. Your local adventure is safe.');
     if (method !== 'GET') validateOrigin(request);
+    // Compatibility gate: tabs running the former ten-minute unlock UI must
+    // refresh before saving. Family-session authentication still runs below;
+    // this public version header is not cryptographic PIN verification.
+    if (path === '/api/state' && method === 'PUT' && request.headers.get('x-greenface-controls') !== 'pin-per-action-v1') {
+      throw new ApiError(426, 'UPDATE_REQUIRED', 'Refresh Greenface to use the new parent controls. Nothing was changed.');
+    }
 
     if (path === '/api/logout' && method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) });
 
@@ -196,7 +226,7 @@ export async function handleRequest(request) {
       await rateLimit(sql, request, config.secret);
       let row;
       if (body.mode === 'create') {
-        const initialState = body.state ?? (await import('../src/lib/model.js')).createInitialState({ demo: false });
+        const initialState = adventureModel.normalizeAdventureState(body.state ?? adventureModel.createInitialState({ demo: false })).state;
         const passwordHash = await hashPassword(password);
         [row] = await sql`INSERT INTO greenface_families (id, code, password_hash, state)
           VALUES (${randomUUID()}, ${familyCode}, ${passwordHash}, ${JSON.stringify(initialState)}::jsonb)
@@ -209,6 +239,7 @@ export async function handleRequest(request) {
         const matches = await verifyPassword(password, encoded);
         if (!row || !matches) throw new ApiError(401, 'INVALID_CREDENTIALS', 'That family code and passphrase do not match.');
       }
+      row = await normalizeCloudRow(sql, row);
       const token = createSession(row.id, config.secret);
       return json(stateResponse(row), body.mode === 'create' ? 201 : 200, { 'Set-Cookie': sessionCookie(request, token) });
     }
@@ -219,20 +250,22 @@ export async function handleRequest(request) {
       if (method === 'PUT') {
         body = await readBody(request);
         validateState(body.state);
+        body.state = adventureModel.normalizeAdventureState(body.state).state;
         if (!Number.isSafeInteger(body.revision) || body.revision < 0) throw new ApiError(400, 'INVALID_REVISION', 'Refresh your adventure before saving again.');
       }
       const sql = await database();
       let row;
       if (method === 'GET') {
-        [row] = await sql`SELECT code, state, revision FROM greenface_families WHERE id = ${session.id}`;
+        [row] = await sql`SELECT id, code, state, revision FROM greenface_families WHERE id = ${session.id}`;
       } else {
         [row] = await sql`UPDATE greenface_families SET state = ${JSON.stringify(body.state)}::jsonb,
           revision = revision + 1, updated_at = NOW()
           WHERE id = ${session.id} AND revision = ${body.revision}
-          RETURNING code, state, revision`;
+          RETURNING id, code, state, revision`;
         if (!row) throw new ApiError(409, 'CONFLICT', 'Another device updated this adventure. Reload cloud progress before saving again.');
       }
       if (!row) throw new ApiError(401, 'SIGNED_OUT', 'This family adventure could not be found. Please sign in again.');
+      if (method === 'GET') row = await normalizeCloudRow(sql, row);
       return json(stateResponse(row));
     }
     return json({ error: 'This method is not supported.', code: 'METHOD_NOT_ALLOWED' }, 405, { Allow: path === '/api/state' ? 'GET, PUT' : 'POST' });

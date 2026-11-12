@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Starts with a clearly labeled sample adventure. Choose **Make it yours** to set a device PIN, enter a nickname, and start with zero stars. Local progress survives reloads; no account is required for device storage.
+Starts empty: zero stars, no school faces, and no streak. Only a parent-approved saved check-in awards a face or its stars. Set a device PIN in the grown-up zone, then use **Make it personal** to enter a nickname. Local progress survives reloads; no account is required for device storage. Older preloaded sample faces and stars are removed automatically while genuine parent-entered records are preserved.
 
 ```sh
 npm test
@@ -35,12 +35,26 @@ Choose **Grown-up zone → Family cloud** to create a family or join on another 
 
 - Green starts at **+10**. Three consecutive green school days earn **2×** stars; five or more earn **3×**. Weekends don't break a streak; missing weekdays do.
 - Yellow starts at **0**, red at **−5**. Both reset the streak. Losses stop at zero. Grown-ups can adjust these values.
-- One face per school date; use kindness bonuses on weekends. Historical check-ins never recalculate stars already earned on later days.
-- Bonuses and consequences require a reason and don't affect the school streak. Only the single most recent action can be undone.
+- One face per school date; use kindness bonuses on weekends. **Grown-up zone → School grades** opens a calendar to add, edit, or remove any school day's grade. Corrections recalculate affected green-day streaks and bonuses.
+- Bonuses and consequences require a reason and don't affect the school streak. Only the single most recent action can be undone; the School grades calendar can correct any saved grade at any time.
 - Rewards and first virtual visits spend stars after parent approval. Visits unlock a fact and passport stamp. Reopening an explored place is free. No travel bookings or purchases occur.
 - Parent controls support custom rewards, settings, JSON backup/restore, and a confirmed fresh start.
 
-The four-digit PIN is a device-level child interaction guard, hashed in browser storage. It is separate from the server's family passphrase and unlocks controls for ten minutes. PINs and session credentials are excluded from adventure backups. Save your family code and passphrase securely; there is no email recovery service.
+## Add your own places
+
+Choose **Adventure map → Add a place** (or **Grown-up zone → Add a place**) and enter your parent PIN. Give the place a name, country or area, star cost, and stamp. Select USA for mainland destinations or World for islands and international places, then tap the map to drop a pin. The map also supports Enter and arrow keys; **Enter exact coordinates** allows a precise location. Add an optional little discovery to read aloud during the virtual visit.
+
+Custom places appear on the map and in the destination cards. They use the same parent-approved star spending and passport stamps as built-in places. Family cloud, local storage, and backups preserve them. Adding a place doesn't spend stars. Existing adventures and backups continue to work. Turks & Caicos and Holmes Beach, Florida are also included as built-in destinations.
+
+## Reset faces and unapproved trips
+
+Open **Grown-up zone → Reset progress**. **Reset all faces** clears every school grade and streak and recalculates stars without awarding or refunding stars. It preserves the passport and redeemed rewards. **Clear faces, stars & trips** also empties the star jar, passport, redeemed rewards, and progress history. Both keep the child's name, point settings, rewards menu, and custom destinations. Confirm your selection and enter your PIN to apply it.
+
+There is no timed parent unlock. Every grade save/correction/removal, star adjustment, reward, trip, undo, and reset requires a new PIN approval. Sound can be toggled by the child. Closing the approval dialog cancels the pending action. Refresh tabs opened before this update; older cloud clients are prevented from saving progress until refreshed.
+
+The four-digit PIN is a device-level child interaction guard, hashed in browser storage. Each change to school grades, stars, rewards, visits, places, settings, resets, or restored progress requires a fresh PIN approval. It is separate from the server's family passphrase. PINs and session credentials are excluded from adventure backups. Save your family code and passphrase securely; there is no email recovery service.
+
+Refresh any Greenface tabs opened before this parent-control update. Cloud saves from older tabs are rejected with `UPDATE_REQUIRED` until refreshed. This version check blocks outdated controls; family-session authentication remains separate.
 
 ## Assets and accessibility
 

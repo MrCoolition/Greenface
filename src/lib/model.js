@@ -4,7 +4,7 @@ import { validateAdventureState } from './stateValidation.js';
 export const STORAGE_KEY = 'greenface-adventure-v1';
 export const DEFAULT_SETTINGS = Object.freeze({
   childName: 'Superstar', greenPoints: 10, yellowPoints: 0, redPoints: -5,
-  soundEnabled: true, goalRewardId: 'movie-night', parentPin: '', customRewards: [],
+  soundEnabled: true, goalRewardId: 'movie-night', parentPin: '', customRewards: [], customDestinations: [],
 });
 
 export const REWARDS = Object.freeze([
@@ -32,6 +32,10 @@ export const DESTINATIONS = Object.freeze([
   place('seattle', 'Seattle', 'United States', '🛸', 55, 47.61, -122.33, 'us', 'The Space Needle looks a little like a flying saucer on a tall stick!'),
   place('new-orleans', 'New Orleans', 'United States', '🎷', 50, 29.95, -90.07, 'us', 'New Orleans is famous for joyful music and colorful parades!'),
   place('denver', 'Denver', 'United States', '🏔️', 50, 39.74, -104.99, 'us', 'Denver sits a whole mile above the ocean, near the Rocky Mountains!'),
+  // Holmes Beach geographic center: U.S. Census ACS26 incorporated places.
+  place('holmes-beach', 'Holmes Beach', 'United States', '🐚', 100, 27.5108621, -82.7153094, 'us', 'Holmes Beach is on Anna Maria Island, where sea turtles nest along the sandy shore.'),
+  // Grace Bay representative pin: Turks and Caicos DECR beach-access inventory.
+  place('turks-caicos', 'Turks & Caicos', 'Turks and Caicos Islands', '🏝️', 150, 21.79730, -72.18250, 'world', 'Grace Bay has soft white sand and clear turquoise water. What sea creatures can you imagine spotting?'),
   place('paris', 'Paris', 'France', '🗼', 100, 48.86, 2.35, 'world', 'The Eiffel Tower sparkles with thousands of little lights at night!'),
   place('london', 'London', 'United Kingdom', '💂', 90, 51.51, -0.13, 'world', 'London has bright red buses with two floors!'),
   place('rome', 'Rome', 'Italy', '🏛️', 90, 41.9, 12.5, 'world', 'The Colosseum is a giant arena that was built almost 2,000 years ago!'),
@@ -45,6 +49,8 @@ export const DESTINATIONS = Object.freeze([
   place('reykjavik', 'Reykjavík', 'Iceland', '🌌', 100, 64.15, -21.94, 'world', 'Sometimes the night sky over Iceland glows with dancing northern lights!'),
   place('vancouver', 'Vancouver', 'Canada', '🍁', 75, 49.28, -123.12, 'world', 'In Vancouver, you can see mountains, forests, and the ocean all in one day!'),
 ]);
+
+export const getDestinations = state => [...DESTINATIONS, ...(state.settings.customDestinations || [])];
 
 export const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -77,9 +83,9 @@ export function getStreak(state, today = localDate()) {
   return streakAt(state.behaviors, today);
 }
 
-export function createInitialState({ demo = true } = {}) {
+export function createInitialState({ demo = false } = {}) {
   const state = {
-    version: 1, demo, stars: demo ? 120 : 0, settings: { ...DEFAULT_SETTINGS, customRewards: [] },
+    version: 1, demo, stars: demo ? 120 : 0, settings: { ...DEFAULT_SETTINGS, customRewards: [], customDestinations: [] },
     behaviors: [], history: [], passport: [], redemptions: [], undo: null,
   };
   if (demo) {
@@ -98,11 +104,65 @@ function commit(state, before, action) {
   state.history.unshift({ id: id(), createdAt: new Date().toISOString(), date: localDate(), ...action });
 }
 
+const behaviorTitle = color => color === 'green' ? 'A green day!' : color === 'yellow' ? 'Keep practicing!' : 'A fresh start tomorrow';
+function openingBalance(state) {
+  const net = state.history.reduce((total, action) => total + BigInt(action.points), 0n);
+  const opening = BigInt(state.stars) - net;
+  return opening > 0n ? opening : 0n;
+}
+
+function historicalBase(entry, settings) {
+  if (Number.isSafeInteger(entry.basePoints)) return entry.basePoints;
+  const awarded = entry.requestedPoints ?? entry.points;
+  const inferred = entry.color === 'green' ? awarded / (entry.multiplier || 1) : awarded;
+  if (Number.isSafeInteger(inferred) && Math.abs(inferred) <= 1000 && (entry.color !== 'green' || inferred > 0)) return inferred;
+  return settings[`${entry.color}Points`];
+}
+
+// Recalculate school bonuses by school date, then apply debits/credits in the
+// order the grown-up actually saved them. Receipts and stamps stay intact.
+function replayLedger(state, opening) {
+  let previous = null;
+  let streak = 0;
+  const entries = [...state.behaviors].sort((a, b) => a.date.localeCompare(b.date));
+  for (const entry of entries) {
+    entry.basePoints = historicalBase(entry, state.settings);
+    streak = entry.color === 'green' ? (previous?.color === 'green' && previous.date === previousWeekday(entry.date) ? streak : 0) + 1 : 0;
+    entry.streak = streak;
+    entry.multiplier = entry.color === 'green' ? getMultiplier(streak) : 1;
+    entry.requestedPoints = entry.basePoints * entry.multiplier;
+    previous = entry;
+  }
+  const byId = new Map(entries.map(entry => [entry.id, entry]));
+  const byDate = new Map(entries.map(entry => [entry.date, entry]));
+  let balance = opening;
+  for (const action of [...state.history].reverse()) {
+    const entry = action.type === 'behavior' ? byId.get(action.id) || byDate.get(action.date) : null;
+    if (entry) {
+      Object.assign(action, entry, { title: behaviorTitle(entry.color) });
+    }
+    const requested = action.requestedPoints ?? action.points;
+    const next = balance + BigInt(requested);
+    const clamped = next < 0n ? 0n : next;
+    if (clamped > BigInt(Number.MAX_SAFE_INTEGER)) throw Error('Your star jar is full. Spend some stars before adding more.');
+    action.requestedPoints = requested;
+    action.points = Number(clamped - balance) || 0;
+    if (entry) entry.points = action.points;
+    balance = clamped;
+  }
+  state.stars = Number(balance);
+}
+
+function replaceState(state, next) {
+  for (const key of Object.keys(state)) delete state[key];
+  Object.assign(state, next);
+}
+
 export function recordBehavior(state, { color, date = localDate(), note = '' } = {}) {
   if (!['green', 'yellow', 'red'].includes(color)) return { ok: false, message: 'Choose a green, yellow, or red face.' };
   if (!validDate(date) || date > localDate()) return { ok: false, message: 'Choose a real date that is today or earlier.' };
   if ([0, 6].includes(dateObject(date).getDay())) return { ok: false, message: 'School check-ins are for Monday through Friday. Use a bonus for weekend kindness!' };
-  if (state.behaviors.some(item => item.date === date)) return { ok: false, message: 'That day already has a face. Undo the latest check-in to change it.' };
+  if (state.behaviors.some(item => item.date === date)) return { ok: false, message: 'That day already has a face. Edit it in the grown-up check-in controls.' };
   const earlier = state.behaviors.filter(item => item.date < date);
   const last = earlier.sort((a, b) => b.date.localeCompare(a.date))[0];
   const streak = color === 'green' ? (last?.date === previousWeekday(date) ? streakAt(earlier, last.date) : 0) + 1 : 0;
@@ -110,12 +170,70 @@ export function recordBehavior(state, { color, date = localDate(), note = '' } =
   const requested = state.settings[`${color}Points`] * multiplier;
   if (requested > 0 && !Number.isSafeInteger(state.stars + requested)) return { ok: false, message: 'Your star jar is full. Spend some stars before adding more.' };
   const before = snapshot(state);
+  const next = clone(state);
   const points = Math.max(-state.stars, requested) || 0;
-  state.stars += points;
-  const entry = { id: id(), date, color, note: String(note).trim().slice(0, 250), points, multiplier, streak };
-  state.behaviors.push(entry);
-  commit(state, before, { ...entry, type: 'behavior', title: color === 'green' ? 'A green day!' : color === 'yellow' ? 'Keep practicing!' : 'A fresh start tomorrow' });
-  return { ok: true, points, multiplier, streak, message: color === 'green' ? `Amazing! You earned ${points} stars${multiplier > 1 ? ` with a ${multiplier}× green streak` : ''}!` : color === 'yellow' ? 'Every day is a chance to grow. Let’s try for green tomorrow!' : 'Everyone has tricky days. Tomorrow is a fresh start.' };
+  const entry = { id: id(), date, color, note: String(note).trim().slice(0, 250), points, multiplier, streak, basePoints: state.settings[`${color}Points`], requestedPoints: requested };
+  next.behaviors.push(entry);
+  commit(next, before, { ...entry, type: 'behavior', title: behaviorTitle(color) });
+  try { replayLedger(next, openingBalance(state)); }
+  catch (error) { return { ok: false, message: error.message }; }
+  const delta = next.stars - state.stars;
+  replaceState(state, next);
+  return { ok: true, points: delta, awardedPoints: entry.points, multiplier: entry.multiplier, streak: entry.streak, message: color === 'green' ? `Green day saved. Your star jar has ${state.stars} stars${entry.multiplier > 1 ? ` with a ${entry.multiplier}× green streak` : ''}!` : color === 'yellow' ? 'Yellow day saved. Every day is a chance to grow.' : 'Red day saved. Tomorrow is a fresh start.' };
+}
+
+export function updateBehavior(state, { date, color, note } = {}) {
+  const existing = state.behaviors.find(entry => entry.date === date);
+  if (!existing) return { ok: false, message: 'There is no school grade for that date yet.' };
+  if (!['green', 'yellow', 'red'].includes(color)) return { ok: false, message: 'Choose a green, yellow, or red face.' };
+  const before = snapshot(state);
+  const next = clone(state);
+  const entry = next.behaviors.find(item => item.date === date);
+  entry.basePoints = color === existing.color ? historicalBase(existing, state.settings) : state.settings[`${color}Points`];
+  entry.color = color;
+  if (note !== undefined) entry.note = String(note).trim().slice(0, 250);
+  try { replayLedger(next, openingBalance(state)); }
+  catch (error) { return { ok: false, message: error.message }; }
+  const delta = next.stars - state.stars;
+  commit(next, before, { type: 'adjustment', title: 'Corrected a school grade', note: `${date}: ${existing.color} → ${color}. School streaks and stars recalculated.`, points: 0, requestedPoints: 0 });
+  replaceState(state, next);
+  return { ok: true, points: delta, message: 'School grade corrected. Streaks and stars now match the recorded grades.' };
+}
+
+export function removeBehavior(state, date) {
+  const existing = state.behaviors.find(entry => entry.date === date);
+  if (!existing) return { ok: false, message: 'There is no school grade for that date.' };
+  const before = snapshot(state);
+  const next = clone(state);
+  next.behaviors = next.behaviors.filter(entry => entry.date !== date);
+  next.history = next.history.filter(action => !(action.type === 'behavior' && (action.id === existing.id || action.date === date)));
+  try { replayLedger(next, openingBalance(state)); }
+  catch (error) { return { ok: false, message: error.message }; }
+  const delta = next.stars - state.stars;
+  commit(next, before, { type: 'adjustment', title: 'Removed a school grade', note: `${date}: removed the ${existing.color} grade. School streaks and stars recalculated.`, points: 0, requestedPoints: 0 });
+  replaceState(state, next);
+  return { ok: true, points: delta, message: 'School grade removed. That day is empty, and streaks and stars have been recalculated.' };
+}
+
+export function resetFaces(state) {
+  if (!state.behaviors.length && !state.history.some(action => action.type === 'behavior')) return { ok: false, message: 'There are no recorded school grades to clear.' };
+  const before = snapshot(state);
+  const next = clone(state);
+  next.behaviors = [];
+  next.history = next.history.filter(action => action.type !== 'behavior');
+  try { replayLedger(next, openingBalance(state)); }
+  catch (error) { return { ok: false, message: error.message }; }
+  // Clearing a red grade must not hand back stars. Record a real balancing
+  // debit so later edits/replays cannot accidentally refund those stars.
+  if (next.stars > state.stars) {
+    const debit = state.stars - next.stars;
+    next.stars = state.stars;
+    next.history.unshift({ id: id(), createdAt: new Date().toISOString(), date: localDate(), type: 'adjustment', title: 'Preserved star jar after grade reset', note: 'Clearing school grades does not award or refund stars.', points: debit, requestedPoints: debit });
+  }
+  const delta = next.stars - state.stars;
+  commit(next, before, { type: 'adjustment', title: 'Reset all school grades', note: 'All school faces cleared. Family bonuses, purchases, and passport stamps were kept.', points: 0, requestedPoints: 0 });
+  replaceState(state, next);
+  return { ok: true, points: delta, message: 'All school faces cleared. School streaks start from zero; family settings and trips stay.' };
 }
 
 export function adjustPoints(state, { amount, note = '' } = {}) {
@@ -126,7 +244,7 @@ export function adjustPoints(state, { amount, note = '' } = {}) {
   const before = snapshot(state);
   const points = Math.max(-state.stars, value) || 0;
   state.stars += points;
-  commit(state, before, { type: 'adjustment', title: value > 0 ? 'A little extra kindness' : 'Practice makes progress', note: String(note).trim().slice(0, 250), points });
+  commit(state, before, { type: 'adjustment', title: value > 0 ? 'A little extra kindness' : 'Practice makes progress', note: String(note).trim().slice(0, 250), points, requestedPoints: value });
   return { ok: true, points, message: points >= 0 ? `${points} bonus stars. Great effort!` : `${Math.abs(points)} stars used. A fresh chance is always ahead.` };
 }
 
@@ -137,20 +255,40 @@ export function redeemReward(state, rewardId) {
   const before = snapshot(state);
   state.stars -= reward.cost;
   state.redemptions.push({ id: id(), rewardId, date: localDate(), cost: reward.cost });
-  commit(state, before, { type: 'reward', title: reward.name, rewardId, points: -reward.cost, emoji: reward.emoji });
+  commit(state, before, { type: 'reward', title: reward.name, rewardId, points: -reward.cost, requestedPoints: -reward.cost, emoji: reward.emoji });
   return { ok: true, points: -reward.cost, message: `${reward.emoji} You earned ${reward.name.toLowerCase()}! Plan it with your grown-up.` };
 }
 
 export function visitDestination(state, destinationId) {
-  const destination = DESTINATIONS.find(item => item.id === destinationId);
+  const destination = getDestinations(state).find(item => item.id === destinationId);
   if (!destination) return { ok: false, message: 'That destination could not be found.' };
   if (state.passport.some(item => item.destinationId === destinationId)) return { ok: false, message: 'You already have this passport stamp. You can explore it again for free!' };
   if (state.stars < destination.cost) return { ok: false, message: `${destination.cost - state.stars} more stars and your adventure awaits!` };
   const before = snapshot(state);
   state.stars -= destination.cost;
   state.passport.push({ destinationId, date: localDate(), cost: destination.cost });
-  commit(state, before, { type: 'destination', title: `Explored ${destination.name}`, destinationId, points: -destination.cost, emoji: destination.emoji });
+  commit(state, before, { type: 'destination', title: `Explored ${destination.name}`, destinationId, points: -destination.cost, requestedPoints: -destination.cost, emoji: destination.emoji });
   return { ok: true, points: -destination.cost, message: `${destination.emoji} Welcome to ${destination.name}! Your passport has a new stamp.` };
+}
+
+function normalizeDestination(input, destinationId) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const { name, country, region = 'world' } = input;
+  const emoji = input.emoji === undefined || input.emoji === '' ? '📍' : input.emoji;
+  const fact = input.fact === undefined || input.fact === '' ? 'A new place for our family to explore together!' : input.fact;
+  if (typeof name !== 'string' || !name.trim() || name.length > 60 || typeof country !== 'string' || !country.trim() || country.length > 80) return null;
+  if (typeof emoji !== 'string' || !emoji.trim() || emoji.length > 16 || typeof fact !== 'string' || !fact.trim() || fact.length > 250) return null;
+  for (const key of ['cost', 'lat', 'lon']) if (!['number', 'string'].includes(typeof input[key]) || String(input[key]).trim() === '' || !Number.isFinite(Number(input[key]))) return null;
+  return place(destinationId, name.trim(), country.trim(), emoji.trim(), Number(input.cost), Number(input.lat), Number(input.lon), region, fact.trim());
+}
+
+export function addDestination(state, details) {
+  if ((state.settings.customDestinations || []).length >= 100) return { ok: false, message: 'Your map can hold up to 100 family destinations.' };
+  const destination = normalizeDestination(details, `custom-${id()}`);
+  if (!destination) return { ok: false, message: 'Add a name, country, star cost, and valid map coordinates for your destination.' };
+  const result = updateSettings(state, { customDestinations: [...(state.settings.customDestinations || []), destination] });
+  if (!result.ok) return result;
+  return { ok: true, destination, message: `${destination.emoji} ${destination.name} is on your adventure map!` };
 }
 
 export function undoLastAction(state) {
@@ -195,6 +333,15 @@ export function updateSettings(state, patch = {}) {
     if (![...REWARDS, ...(settings.customRewards || [])].some(item => item.id === patch.goalRewardId)) return { ok: false, message: 'Choose an available reward as your goal.' };
     settings.goalRewardId = patch.goalRewardId;
   }
+  if ('customDestinations' in patch) {
+    if (!Array.isArray(patch.customDestinations) || patch.customDestinations.length > 100) return { ok: false, message: 'Your map can hold up to 100 family destinations.' };
+    const destinations = patch.customDestinations.map(item => normalizeDestination(item, item?.id));
+    const undo = state.undo ? { ...state.undo, settings: { ...state.undo.settings, customDestinations: clone(destinations) } } : state.undo;
+    if (destinations.some(item => !item) || !validateAdventureState({ ...state, settings: { ...settings, customDestinations: destinations }, undo })) return { ok: false, message: 'Choose unique destinations with 1–10,000 stars and valid coordinates. USA pins must be on the mainland; use World for other places.' };
+    settings.customDestinations = destinations;
+    // A settings addition should survive undoing a prior star transaction.
+    if (state.undo) state.undo.settings.customDestinations = clone(destinations);
+  }
   state.settings = settings;
   return { ok: true, message: 'Your adventure settings are saved.' };
 }
@@ -220,11 +367,43 @@ export function loadState(storage = globalThis.localStorage) {
   try {
     const raw = storage?.getItem(STORAGE_KEY);
     if (!raw) return createInitialState();
-    const state = JSON.parse(raw);
-    if (!validateState(state)) return createInitialState();
-    state.settings = { ...DEFAULT_SETTINGS, ...state.settings };
-    return state;
+    const parsed = JSON.parse(raw);
+    if (!validateState(parsed)) return createInitialState();
+    const normalized = normalizeAdventureState(parsed);
+    if (normalized.changed) saveState(normalized.state, storage);
+    return normalized.state;
   } catch { return createInitialState(); }
+}
+
+const settingsWithDefaults = settings => ({ ...DEFAULT_SETTINGS, ...settings, customRewards: settings.customRewards || [], customDestinations: settings.customDestinations || [] });
+function sameSavedValue(left, right) {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every(key => Object.hasOwn(right, key) && sameSavedValue(left[key], right[key]));
+}
+
+// Old releases seeded a preview with 120 stars and three demo-* grades.
+// Remove only those samples. Genuine parent transactions replay from an empty
+// jar, with bonuses based only on actual grades. Never leave an undo path back
+// to fabricated grades. This is shared by local storage and the Neon API.
+export function normalizeAdventureState(input) {
+  if (!validateAdventureState(input)) throw Error('Invalid adventure state');
+  const state = clone(input);
+  state.settings = settingsWithDefaults(state.settings);
+  if (state.undo) state.undo.settings = settingsWithDefaults(state.undo.settings);
+  if (state.demo) {
+    state.behaviors = state.behaviors.filter(entry => !entry.id.startsWith('demo-'));
+    state.history = state.history.filter(action => !action.id.startsWith('demo-'));
+    state.demo = false;
+    state.undo = null;
+    replayLedger(state, 0n);
+  } else if (state.undo?.demo) {
+    state.undo = normalizeAdventureState(state.undo).state;
+  }
+  return { state, changed: !sameSavedValue(input, state) };
 }
 
 // Suitable for JSONB storage and downloadable backups; no browser-specific objects.
@@ -235,14 +414,18 @@ export function validateState(state) {
 export function exportState(state) {
   // Parent locks and cloud credentials belong to the device/session, never a backup.
   const { version, demo, stars, behaviors, history, passport, redemptions } = state;
-  const { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards = [] } = state.settings;
-  return JSON.stringify({ version, demo, stars, settings: { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards }, behaviors, history, passport, redemptions, undo: null }, null, 2);
+  const { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards = [], customDestinations = [] } = state.settings;
+  const backup = { version, demo, stars, settings: { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards, customDestinations }, behaviors, history, passport, redemptions, undo: null };
+  const clean = normalizeAdventureState(backup).state;
+  delete clean.settings.parentPin;
+  return JSON.stringify(clean, null, 2);
 }
 export function importState(json) {
   try {
-    const state = typeof json === 'string' ? JSON.parse(json) : clone(json);
-    if (!validateState(state)) return { ok: false, message: 'That backup does not contain a valid Greenface adventure.' };
-    state.settings = { ...DEFAULT_SETTINGS, ...state.settings, parentPin: '' };
+    const parsed = typeof json === 'string' ? JSON.parse(json) : clone(json);
+    if (!validateState(parsed)) return { ok: false, message: 'That backup does not contain a valid Greenface adventure.' };
+    const { state } = normalizeAdventureState(parsed);
+    state.settings = { ...settingsWithDefaults(state.settings), parentPin: '' };
     state.undo = null;
     return { ok: true, state, message: 'Your adventure is ready to restore.' };
   } catch { return { ok: false, message: 'That backup could not be read.' }; }

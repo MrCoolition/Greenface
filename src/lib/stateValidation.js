@@ -3,12 +3,13 @@
 const COLORS = new Set(['green', 'yellow', 'red']);
 const HISTORY_TYPES = new Set(['behavior', 'adjustment', 'reward', 'destination']);
 const DEFAULT_REWARD_IDS = new Set(['movie-night', 'choose-dinner', 'ice-cream', 'extra-story', 'park-adventure', 'mystery-surprise']);
-const DESTINATION_IDS = new Set(['new-york', 'orlando', 'grand-canyon', 'san-francisco', 'yellowstone', 'chicago', 'washington', 'seattle', 'new-orleans', 'denver', 'paris', 'london', 'rome', 'cairo', 'tokyo', 'sydney', 'rio', 'cape-town', 'beijing', 'delhi', 'reykjavik', 'vancouver']);
+const DESTINATION_IDS = new Set(['new-york', 'orlando', 'grand-canyon', 'san-francisco', 'yellowstone', 'chicago', 'washington', 'seattle', 'new-orleans', 'denver', 'paris', 'london', 'rome', 'cairo', 'tokyo', 'sydney', 'rio', 'cape-town', 'beijing', 'delhi', 'reykjavik', 'vancouver', 'turks-caicos', 'holmes-beach']);
 const STATE_KEYS = new Set(['version', 'demo', 'stars', 'settings', 'behaviors', 'history', 'passport', 'redemptions', 'undo']);
-const SETTINGS_KEYS = new Set(['childName', 'greenPoints', 'yellowPoints', 'redPoints', 'soundEnabled', 'goalRewardId', 'parentPin', 'customRewards']);
-const BEHAVIOR_KEYS = new Set(['id', 'date', 'color', 'note', 'points', 'multiplier', 'streak']);
+const SETTINGS_KEYS = new Set(['childName', 'greenPoints', 'yellowPoints', 'redPoints', 'soundEnabled', 'goalRewardId', 'parentPin', 'customRewards', 'customDestinations']);
+const BEHAVIOR_KEYS = new Set(['id', 'date', 'color', 'note', 'points', 'multiplier', 'streak', 'basePoints', 'requestedPoints']);
 const HISTORY_KEYS = new Set([...BEHAVIOR_KEYS, 'type', 'title', 'createdAt', 'emoji', 'rewardId', 'destinationId']);
 const REWARD_KEYS = new Set(['id', 'name', 'cost', 'emoji', 'description', 'color']);
+const DESTINATION_KEYS = new Set(['id', 'name', 'country', 'emoji', 'cost', 'lat', 'lon', 'region', 'fact', 'x', 'y']);
 const PASSPORT_KEYS = new Set(['destinationId', 'date', 'cost']);
 const REDEMPTION_KEYS = new Set(['id', 'rewardId', 'date', 'cost']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -17,6 +18,16 @@ const integer = (value, min = -Number.MAX_SAFE_INTEGER, max = Number.MAX_SAFE_IN
 const keys = (value, allowed) => object(value) && Object.keys(value).every(key => allowed.has(key));
 const optionalText = (value, key, max) => value[key] === undefined || text(value[key], max);
 const list = value => Array.isArray(value) && value.length <= 5000;
+const coordinate = (value, min, max) => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+
+function destination(value) {
+  if (!keys(value, DESTINATION_KEYS) || !text(value.id, 100, 1) || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value.id)) return false;
+  if (!text(value.name, 60, 1) || !value.name.trim() || !text(value.country, 80, 1) || !value.country.trim()) return false;
+  if (!text(value.emoji, 16, 1) || !value.emoji.trim() || !text(value.fact, 250, 1) || !value.fact.trim() || !integer(value.cost, 1, 10000)) return false;
+  if (!coordinate(value.lat, -90, 90) || !coordinate(value.lon, -180, 180) || !['us', 'world'].includes(value.region)) return false;
+  if (value.region === 'us' && (value.lat < 24 || value.lat > 50 || value.lon < -125 || value.lon > -66)) return false;
+  return (value.x === undefined || coordinate(value.x, 0, 100)) && (value.y === undefined || coordinate(value.y, 0, 100));
+}
 
 function date(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || typeof value !== 'string') return false;
@@ -33,6 +44,14 @@ function settings(value) {
   if (!integer(value.greenPoints, 1, 1000) || !integer(value.yellowPoints, -1000, 1000) || !integer(value.redPoints, -1000, 0)) return false;
   if (value.soundEnabled !== undefined && typeof value.soundEnabled !== 'boolean') return false;
   if (!optionalText(value, 'goalRewardId', 100) || (value.parentPin !== undefined && (typeof value.parentPin !== 'string' || (value.parentPin !== '' && !/^\d{4}$/.test(value.parentPin))))) return false;
+  if (value.customDestinations !== undefined) {
+    if (!Array.isArray(value.customDestinations) || value.customDestinations.length > 100) return false;
+    const destinationIds = new Set(DESTINATION_IDS);
+    for (const item of value.customDestinations) {
+      if (!destination(item) || destinationIds.has(item.id)) return false;
+      destinationIds.add(item.id);
+    }
+  }
   if (value.customRewards === undefined) return true;
   if (!Array.isArray(value.customRewards) || value.customRewards.length > 50) return false;
   const ids = new Set(DEFAULT_REWARD_IDS);
@@ -47,10 +66,12 @@ function settings(value) {
 function behavior(value) {
   return keys(value, BEHAVIOR_KEYS) && text(value.id, 100, 1) && schoolDate(value.date) && COLORS.has(value.color) && integer(value.points)
     && optionalText(value, 'note', 250) && (value.multiplier === undefined || integer(value.multiplier, 1, 3))
-    && (value.streak === undefined || integer(value.streak, 0));
+    && (value.streak === undefined || integer(value.streak, 0))
+    && (value.basePoints === undefined || integer(value.basePoints, -1000, 1000))
+    && (value.requestedPoints === undefined || integer(value.requestedPoints));
 }
 
-function history(value) {
+function history(value, destinationIds) {
   if (!keys(value, HISTORY_KEYS) || !text(value.id, 100, 1) || !HISTORY_TYPES.has(value.type) || !text(value.title, 120, 1) || !integer(value.points) || !date(value.date)) return false;
   if (!optionalText(value, 'note', 250) || !optionalText(value, 'emoji', 16) || !optionalText(value, 'rewardId', 100) || !optionalText(value, 'destinationId', 100)) return false;
   if (value.createdAt !== undefined && (!text(value.createdAt, 40, 1) || Number.isNaN(new Date(value.createdAt).getTime()))) return false;
@@ -58,6 +79,10 @@ function history(value) {
   if (value.color !== undefined && !COLORS.has(value.color)) return false;
   if (value.multiplier !== undefined && !integer(value.multiplier, 1, 3)) return false;
   if (value.streak !== undefined && !integer(value.streak, 0)) return false;
+  if (value.basePoints !== undefined && !integer(value.basePoints, -1000, 1000)) return false;
+  if (value.requestedPoints !== undefined && !integer(value.requestedPoints)) return false;
+  if (value.type === 'destination' && !destinationIds.has(value.destinationId)) return false;
+  if (value.destinationId !== undefined && !destinationIds.has(value.destinationId)) return false;
   return true;
 }
 
@@ -69,10 +94,11 @@ function snapshot(state, depth) {
     if (!behavior(entry) || dates.has(entry.date)) return false;
     dates.add(entry.date);
   }
-  if (!state.history.every(history)) return false;
+  const destinationIds = new Set([...DESTINATION_IDS, ...(state.settings.customDestinations || []).map(item => item.id)]);
+  if (!state.history.every(item => history(item, destinationIds))) return false;
   const destinations = new Set();
   for (const entry of state.passport) {
-    if (!keys(entry, PASSPORT_KEYS) || !DESTINATION_IDS.has(entry.destinationId) || destinations.has(entry.destinationId) || !date(entry.date) || !integer(entry.cost, 0, 10000)) return false;
+    if (!keys(entry, PASSPORT_KEYS) || !destinationIds.has(entry.destinationId) || destinations.has(entry.destinationId) || !date(entry.date) || !integer(entry.cost, 0, 10000)) return false;
     destinations.add(entry.destinationId);
   }
   for (const entry of state.redemptions) {
