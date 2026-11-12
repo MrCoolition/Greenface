@@ -51,7 +51,7 @@ export function renderAdventureMap({ region = 'us', destinations = [], visited =
     const canAfford = balance >= Number(destination.cost || 0);
     const name = destination.shortName || destination.name;
     // World destinations in dense Europe have optional manual callout shifts.
-    const defaultOffset = world ? ({reykjavik: [-55, -60], london: [-25, -10], paris: [0, 40], rome: [35, 10]}[destination.id] || [0, 0]) : [0, 0];
+    const defaultOffset = world ? ({reykjavik: [-55, -60], london: [-25, -10], paris: [0, 40], rome: [35, 10], cairo: [35, 45]}[destination.id] || [0, 0]) : [0, 0];
     const dx = Number(destination.mapDx ?? defaultOffset[0]), dy = Number(destination.mapDy ?? defaultOffset[1]);
     const mx = x + dx, my = y + dy;
     const circle = world ? 19 : 24;
@@ -59,7 +59,7 @@ export function renderAdventureMap({ region = 'us', destinations = [], visited =
     const labelWidth = Math.min(154, Math.max(68, String(name).length * (world ? 5.8 : 6.2) + 23));
     const costLabel = isVisited ? 'Visited ✓' : `${destination.cost} ★`;
     return `<g class="adventure-map-marker${isVisited ? ' is-visited' : ''}${canAfford ? ' is-affordable' : ''}" data-destination="${escape(destination.id)}" role="button" tabindex="0" aria-label="${escape(name)}. ${isVisited ? 'Already visited.' : `Visit for ${destination.cost} stars.`}" transform="translate(${mx.toFixed(1)} ${my.toFixed(1)})" style="cursor:pointer;outline:none">
-      ${dx || dy ? `<path d="M${-dx} ${-dy}L0 0" stroke="#6d9771" stroke-width="1.5" stroke-dasharray="3 4"/>` : ''}
+      ${dx || dy ? `<g pointer-events="none" aria-hidden="true"><path d="M${-dx} ${-dy}Q${-dx * .55 + dy * .12} ${-dy * .55 - dx * .12} 0 0" fill="none" stroke="#65916c" stroke-width="1.35" stroke-linecap="round" opacity=".85"/><circle cx="${-dx}" cy="${-dy}" r="4.2" fill="#4f7a50" stroke="#fffdf6" stroke-width="1.7"/></g>` : ''}
       <circle class="marker-halo" r="${circle+7}" fill="${isVisited ? '#a7cc76' : '#fff'}" fill-opacity=".35"/>
       <circle class="marker-circle" r="${circle}" fill="${isVisited ? '#edf7d7' : '#fffdf6'}" stroke="${isVisited ? '#7eaa58' : '#9cbe87'}" stroke-width="2" filter="url(#mapPinShadow)"/>
       <text y="${world ? 7 : 9}" text-anchor="middle" font-size="${world ? 23 : 29}" font-family="Apple Color Emoji, Segoe UI Emoji, sans-serif" pointer-events="none">${escape(destination.emoji || '📍')}</text>
