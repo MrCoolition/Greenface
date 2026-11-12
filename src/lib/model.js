@@ -4,7 +4,7 @@ import { validateAdventureState } from './stateValidation.js';
 export const STORAGE_KEY = 'greenface-adventure-v1';
 export const DEFAULT_SETTINGS = Object.freeze({
   childName: 'Superstar', greenPoints: 10, yellowPoints: 0, redPoints: -5,
-  soundEnabled: true, goalRewardId: 'movie-night', parentPin: '', customRewards: [], customDestinations: [],
+  soundEnabled: true, goalRewardId: 'movie-night', parentPin: '', customRewards: [], customDestinations: [], destinationCosts: {},
 });
 
 export const REWARDS = Object.freeze([
@@ -22,35 +22,35 @@ const place = (id, name, country, emoji, cost, lat, lon, region, fact) => ({
 });
 
 export const DESTINATIONS = Object.freeze([
-  place('new-york', 'New York', 'United States', '🗽', 50, 40.71, -74.01, 'us', 'The Statue of Liberty wears a crown with seven spikes, one for each continent!'),
-  place('orlando', 'Orlando', 'United States', '🏰', 80, 28.54, -81.38, 'us', 'Orlando is home to magical castles and lots of sunshine!'),
-  place('grand-canyon', 'Grand Canyon', 'United States', '🏜️', 60, 36.11, -112.11, 'us', 'The Grand Canyon is so deep that you could stack about four tall skyscrapers inside it!'),
-  place('san-francisco', 'San Francisco', 'United States', '🌉', 70, 37.77, -122.42, 'us', 'The Golden Gate Bridge is actually a special shade of orange!'),
-  place('yellowstone', 'Yellowstone', 'United States', '🦬', 65, 44.6, -110.5, 'us', 'Yellowstone has hot springs that look like giant rainbow puddles!'),
-  place('chicago', 'Chicago', 'United States', '🎡', 45, 41.88, -87.63, 'us', 'Chicago helped make the Ferris wheel famous at a huge fair in 1893!'),
-  place('washington', 'Washington, D.C.', 'United States', '🏛️', 45, 38.91, -77.04, 'us', 'You can see giant dinosaur bones at the natural history museum!'),
-  place('seattle', 'Seattle', 'United States', '🛸', 55, 47.61, -122.33, 'us', 'The Space Needle looks a little like a flying saucer on a tall stick!'),
-  place('new-orleans', 'New Orleans', 'United States', '🎷', 50, 29.95, -90.07, 'us', 'New Orleans is famous for joyful music and colorful parades!'),
-  place('denver', 'Denver', 'United States', '🏔️', 50, 39.74, -104.99, 'us', 'Denver sits a whole mile above the ocean, near the Rocky Mountains!'),
+  place('new-york', 'New York', 'United States', '🗽', 2000, 40.71, -74.01, 'us', 'The Statue of Liberty wears a crown with seven spikes, one for each continent!'),
+  place('orlando', 'Orlando', 'United States', '🏰', 3500, 28.54, -81.38, 'us', 'Orlando is home to magical castles and lots of sunshine!'),
+  place('grand-canyon', 'Grand Canyon', 'United States', '🏜️', 5000, 36.11, -112.11, 'us', 'The Grand Canyon is so deep that you could stack about four tall skyscrapers inside it!'),
+  place('san-francisco', 'San Francisco', 'United States', '🌉', 5000, 37.77, -122.42, 'us', 'The Golden Gate Bridge is actually a special shade of orange!'),
+  place('yellowstone', 'Yellowstone', 'United States', '🦬', 6000, 44.6, -110.5, 'us', 'Yellowstone has hot springs that look like giant rainbow puddles!'),
+  place('chicago', 'Chicago', 'United States', '🎡', 2500, 41.88, -87.63, 'us', 'Chicago helped make the Ferris wheel famous at a huge fair in 1893!'),
+  place('washington', 'Washington, D.C.', 'United States', '🏛️', 2500, 38.91, -77.04, 'us', 'You can see giant dinosaur bones at the natural history museum!'),
+  place('seattle', 'Seattle', 'United States', '🛸', 4500, 47.61, -122.33, 'us', 'The Space Needle looks a little like a flying saucer on a tall stick!'),
+  place('new-orleans', 'New Orleans', 'United States', '🎷', 3000, 29.95, -90.07, 'us', 'New Orleans is famous for joyful music and colorful parades!'),
+  place('denver', 'Denver', 'United States', '🏔️', 4000, 39.74, -104.99, 'us', 'Denver sits a whole mile above the ocean, near the Rocky Mountains!'),
   // Holmes Beach geographic center: U.S. Census ACS26 incorporated places.
-  place('holmes-beach', 'Holmes Beach', 'United States', '🐚', 100, 27.5108621, -82.7153094, 'us', 'Holmes Beach is on Anna Maria Island, where sea turtles nest along the sandy shore.'),
+  place('holmes-beach', 'Holmes Beach', 'United States', '🐚', 1500, 27.5108621, -82.7153094, 'us', 'Holmes Beach is on Anna Maria Island, where sea turtles nest along the sandy shore.'),
   // Grace Bay representative pin: Turks and Caicos DECR beach-access inventory.
-  place('turks-caicos', 'Turks & Caicos', 'Turks and Caicos Islands', '🏝️', 150, 21.79730, -72.18250, 'world', 'Grace Bay has soft white sand and clear turquoise water. What sea creatures can you imagine spotting?'),
-  place('paris', 'Paris', 'France', '🗼', 100, 48.86, 2.35, 'world', 'The Eiffel Tower sparkles with thousands of little lights at night!'),
-  place('london', 'London', 'United Kingdom', '💂', 90, 51.51, -0.13, 'world', 'London has bright red buses with two floors!'),
-  place('rome', 'Rome', 'Italy', '🏛️', 90, 41.9, 12.5, 'world', 'The Colosseum is a giant arena that was built almost 2,000 years ago!'),
-  place('cairo', 'Cairo', 'Egypt', '🐪', 100, 30.04, 31.24, 'world', 'The pyramids near Cairo were built from millions of huge stone blocks!'),
-  place('tokyo', 'Tokyo', 'Japan', '🌸', 120, 35.68, 139.69, 'world', 'In spring, cherry blossom trees turn parts of Tokyo pink!'),
-  place('sydney', 'Sydney', 'Australia', '🐨', 130, -33.87, 151.21, 'world', 'The Sydney Opera House has a roof that looks like big white sails!'),
-  place('rio', 'Rio de Janeiro', 'Brazil', '🦜', 110, -22.91, -43.17, 'world', 'Rio has a real rainforest right inside the city!'),
-  place('cape-town', 'Cape Town', 'South Africa', '🐧', 120, -33.92, 18.42, 'world', 'You can find African penguins waddling on a beach near Cape Town!'),
-  place('beijing', 'Beijing', 'China', '🐼', 110, 39.9, 116.41, 'world', 'Parts of the Great Wall wind over the hills near Beijing like a giant dragon!'),
-  place('delhi', 'Delhi', 'India', '🐘', 100, 28.61, 77.21, 'world', 'Delhi is full of colorful markets, gardens, and amazing old buildings!'),
-  place('reykjavik', 'Reykjavík', 'Iceland', '🌌', 100, 64.15, -21.94, 'world', 'Sometimes the night sky over Iceland glows with dancing northern lights!'),
-  place('vancouver', 'Vancouver', 'Canada', '🍁', 75, 49.28, -123.12, 'world', 'In Vancouver, you can see mountains, forests, and the ocean all in one day!'),
+  place('turks-caicos', 'Turks & Caicos', 'Turks and Caicos Islands', '🏝️', 9000, 21.79730, -72.18250, 'world', 'Grace Bay has soft white sand and clear turquoise water. What sea creatures can you imagine spotting?'),
+  place('paris', 'Paris', 'France', '🗼', 12000, 48.86, 2.35, 'world', 'The Eiffel Tower sparkles with thousands of little lights at night!'),
+  place('london', 'London', 'United Kingdom', '💂', 12000, 51.51, -0.13, 'world', 'London has bright red buses with two floors!'),
+  place('rome', 'Rome', 'Italy', '🏛️', 14000, 41.9, 12.5, 'world', 'The Colosseum is a giant arena that was built almost 2,000 years ago!'),
+  place('cairo', 'Cairo', 'Egypt', '🐪', 14000, 30.04, 31.24, 'world', 'The pyramids near Cairo were built from millions of huge stone blocks!'),
+  place('tokyo', 'Tokyo', 'Japan', '🌸', 18000, 35.68, 139.69, 'world', 'In spring, cherry blossom trees turn parts of Tokyo pink!'),
+  place('sydney', 'Sydney', 'Australia', '🐨', 20000, -33.87, 151.21, 'world', 'The Sydney Opera House has a roof that looks like big white sails!'),
+  place('rio', 'Rio de Janeiro', 'Brazil', '🦜', 15000, -22.91, -43.17, 'world', 'Rio has a real rainforest right inside the city!'),
+  place('cape-town', 'Cape Town', 'South Africa', '🐧', 18000, -33.92, 18.42, 'world', 'You can find African penguins waddling on a beach near Cape Town!'),
+  place('beijing', 'Beijing', 'China', '🐼', 17000, 39.9, 116.41, 'world', 'Parts of the Great Wall wind over the hills near Beijing like a giant dragon!'),
+  place('delhi', 'Delhi', 'India', '🐘', 16000, 28.61, 77.21, 'world', 'Delhi is full of colorful markets, gardens, and amazing old buildings!'),
+  place('reykjavik', 'Reykjavík', 'Iceland', '🌌', 14000, 64.15, -21.94, 'world', 'Sometimes the night sky over Iceland glows with dancing northern lights!'),
+  place('vancouver', 'Vancouver', 'Canada', '🍁', 6000, 49.28, -123.12, 'world', 'In Vancouver, you can see mountains, forests, and the ocean all in one day!'),
 ]);
 
-export const getDestinations = state => [...DESTINATIONS, ...(state.settings.customDestinations || [])];
+export const getDestinations = state => [...DESTINATIONS, ...(state.settings.customDestinations || [])].map(destination => ({ ...destination, cost: state.settings.destinationCosts?.[destination.id] ?? destination.cost }));
 
 export const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -85,7 +85,7 @@ export function getStreak(state, today = localDate()) {
 
 export function createInitialState({ demo = false } = {}) {
   const state = {
-    version: 1, demo, stars: demo ? 120 : 0, settings: { ...DEFAULT_SETTINGS, customRewards: [], customDestinations: [] },
+    version: 1, demo, stars: demo ? 120 : 0, settings: { ...DEFAULT_SETTINGS, customRewards: [], customDestinations: [], destinationCosts: {} },
     behaviors: [], history: [], passport: [], redemptions: [], undo: null,
   };
   if (demo) {
@@ -291,6 +291,14 @@ export function addDestination(state, details) {
   return { ok: true, destination, message: `${destination.emoji} ${destination.name} is on your adventure map!` };
 }
 
+export function setDestinationCost(state, destinationId, cost) {
+  const destination = getDestinations(state).find(item => item.id === destinationId);
+  if (!destination) return { ok: false, message: 'Choose a destination on your adventure map.' };
+  if (!['number', 'string'].includes(typeof cost) || !Number.isSafeInteger(Number(cost)) || Number(cost) < 1 || Number(cost) > 100000) return { ok: false, message: 'Set a whole-number destination price from 1 to 100,000 stars.' };
+  const result = updateSettings(state, { destinationCosts: { ...(state.settings.destinationCosts || {}), [destinationId]: Number(cost) } });
+  return result.ok ? { ok: true, message: `${destination.name} now costs ${Number(cost).toLocaleString()} stars. Past trips stay unchanged.` } : result;
+}
+
 export function undoLastAction(state) {
   if (!state.undo) return { ok: false, message: 'There is no recent action to undo.' };
   const restored = clone(state.undo);
@@ -336,11 +344,19 @@ export function updateSettings(state, patch = {}) {
   if ('customDestinations' in patch) {
     if (!Array.isArray(patch.customDestinations) || patch.customDestinations.length > 100) return { ok: false, message: 'Your map can hold up to 100 family destinations.' };
     const destinations = patch.customDestinations.map(item => normalizeDestination(item, item?.id));
-    const undo = state.undo ? { ...state.undo, settings: { ...state.undo.settings, customDestinations: clone(destinations) } } : state.undo;
-    if (destinations.some(item => !item) || !validateAdventureState({ ...state, settings: { ...settings, customDestinations: destinations }, undo })) return { ok: false, message: 'Choose unique destinations with 1–10,000 stars and valid coordinates. USA pins must be on the mainland; use World for other places.' };
+    if (destinations.some(item => !item)) return { ok: false, message: 'Add valid destination names, prices, and coordinates.' };
     settings.customDestinations = destinations;
-    // A settings addition should survive undoing a prior star transaction.
-    if (state.undo) state.undo.settings.customDestinations = clone(destinations);
+  }
+  if ('destinationCosts' in patch) {
+    if (!patch.destinationCosts || typeof patch.destinationCosts !== 'object' || Array.isArray(patch.destinationCosts)) return { ok: false, message: 'Destination prices must be a list of places and their star costs.' };
+    settings.destinationCosts = { ...patch.destinationCosts };
+  }
+  if ('customDestinations' in patch || 'destinationCosts' in patch) {
+    const catalog = { customDestinations: clone(settings.customDestinations || []), destinationCosts: { ...(settings.destinationCosts || {}) } };
+    const undo = state.undo ? { ...state.undo, settings: { ...state.undo.settings, ...catalog } } : state.undo;
+    if (!validateAdventureState({ ...state, settings, undo })) return { ok: false, message: 'Choose known, unique destinations with 1–100,000 stars and valid coordinates. USA pins must be on the mainland; use World for other places.' };
+    // Catalog and price edits must survive undoing a prior star transaction.
+    if (state.undo) Object.assign(state.undo.settings, catalog);
   }
   state.settings = settings;
   return { ok: true, message: 'Your adventure settings are saved.' };
@@ -375,7 +391,7 @@ export function loadState(storage = globalThis.localStorage) {
   } catch { return createInitialState(); }
 }
 
-const settingsWithDefaults = settings => ({ ...DEFAULT_SETTINGS, ...settings, customRewards: settings.customRewards || [], customDestinations: settings.customDestinations || [] });
+const settingsWithDefaults = settings => ({ ...DEFAULT_SETTINGS, ...settings, customRewards: settings.customRewards || [], customDestinations: settings.customDestinations || [], destinationCosts: settings.destinationCosts || {} });
 function sameSavedValue(left, right) {
   if (left === right) return true;
   if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
@@ -414,8 +430,8 @@ export function validateState(state) {
 export function exportState(state) {
   // Parent locks and cloud credentials belong to the device/session, never a backup.
   const { version, demo, stars, behaviors, history, passport, redemptions } = state;
-  const { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards = [], customDestinations = [] } = state.settings;
-  const backup = { version, demo, stars, settings: { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards, customDestinations }, behaviors, history, passport, redemptions, undo: null };
+  const { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards = [], customDestinations = [], destinationCosts = {} } = state.settings;
+  const backup = { version, demo, stars, settings: { childName, greenPoints, yellowPoints, redPoints, soundEnabled, goalRewardId, customRewards, customDestinations, destinationCosts }, behaviors, history, passport, redemptions, undo: null };
   const clean = normalizeAdventureState(backup).state;
   delete clean.settings.parentPin;
   return JSON.stringify(clean, null, 2);

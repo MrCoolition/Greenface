@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInitialState, recordBehavior, adjustPoints, redeemReward, visitDestination, undoLastAction, updateSettings, resetAdventure, getStreak, getMultiplier, saveState, loadState, localDate, STORAGE_KEY, exportState, importState, validateState, DESTINATIONS, addDestination, getDestinations, normalizeAdventureState, updateBehavior, removeBehavior, resetFaces } from '../src/lib/model.js';
+import { createInitialState, recordBehavior, adjustPoints, redeemReward, visitDestination, undoLastAction, updateSettings, resetAdventure, getStreak, getMultiplier, saveState, loadState, localDate, STORAGE_KEY, exportState, importState, validateState, DESTINATIONS, addDestination, getDestinations, normalizeAdventureState, updateBehavior, removeBehavior, resetFaces, setDestinationCost, REWARDS } from '../src/lib/model.js';
 
 function recentSchoolDates(count) {
   const date = new Date();
@@ -68,6 +68,7 @@ test('rewards and destinations deduct once and undo atomically restores purchase
   assert.equal(state.stars, before);
   assert.equal(state.redemptions.length, 0);
   assert.equal(undoLastAction(state).ok, false);
+  setDestinationCost(state, 'new-york', 50);
   assert.equal(visitDestination(state, 'new-york').ok, true);
   const starsAfter = state.stars;
   assert.equal(visitDestination(state, 'new-york').ok, false);
@@ -197,7 +198,7 @@ test('requested beach destinations are available in the default catalog', () => 
   const holmes = getDestinations(state).find(item => item.id === 'holmes-beach');
   const turks = getDestinations(state).find(item => item.id === 'turks-caicos');
   assert.equal(holmes.region, 'us');
-  assert.equal(holmes.cost, 100);
+  assert.equal(holmes.cost, 1500);
   assert.equal(holmes.lat, 27.5108621);
   assert.equal(turks.country, 'Turks and Caicos Islands');
   assert.equal(turks.region, 'world');
@@ -270,7 +271,7 @@ test('invalid destination details cannot alter stars, settings, or the pending u
     null, {}, { name: '' }, { country: '' }, { name: 'n'.repeat(61) }, { country: 'c'.repeat(81) },
     { emoji: {} }, { emoji: 'x'.repeat(17) }, { fact: 'f'.repeat(251) },
     { lat: NaN }, { lon: Infinity }, { lat: 91 }, { lon: -181 }, { lat: '' }, { cost: '' },
-    { cost: 0 }, { cost: -1 }, { cost: 1.5 }, { cost: 10001 }, { region: 'mars' },
+    { cost: 0 }, { cost: -1 }, { cost: 1.5 }, { cost: 100001 }, { region: 'mars' },
     { lat: 64, lon: -149, region: 'us' }, { lat: 21, lon: -157, region: 'us' },
   ];
   for (const patch of invalid) {
@@ -541,4 +542,117 @@ test('full adventure reset clears faces, stars, receipts and stamps while keepin
   assert.equal(state.settings.childName, 'Our explorer');
   assert.equal(state.settings.greenPoints, 15);
   assert.equal(state.settings.customDestinations[0].id, destination.id);
+});
+
+test('major destinations are long-term goals priced far above a small ice cream reward', () => {
+  const state = createInitialState();
+  const costs = Object.fromEntries(getDestinations(state).map(item => [item.id, item.cost]));
+  assert.equal(REWARDS.find(item => item.id === 'ice-cream').cost, 30);
+  assert.equal(costs.yellowstone, 6000);
+  assert.equal(costs.reykjavik, 14000);
+  assert.equal(costs['holmes-beach'], 1500);
+  assert.equal(costs['turks-caicos'], 9000);
+  assert.equal(costs.sydney, 20000);
+  assert.equal(Math.min(...Object.values(costs)), 1500);
+});
+
+test('a parent price override blocks an underfunded visit and charges the exact approved cost', () => {
+  const state = fixtureState();
+  const balance = state.stars;
+  const history = JSON.stringify(state.history);
+  assert.equal(setDestinationCost(state, 'yellowstone', '500').ok, true);
+  assert.equal(getDestinations(state).find(item => item.id === 'yellowstone').cost, 500);
+  assert.equal(state.stars, balance);
+  assert.equal(JSON.stringify(state.history), history);
+  const beforeFailedVisit = JSON.stringify(state);
+  assert.equal(visitDestination(state, 'yellowstone').ok, false);
+  assert.equal(JSON.stringify(state), beforeFailedVisit);
+  adjustPoints(state, { amount: 380, note: 'Parent-approved goal bonus' });
+  assert.equal(visitDestination(state, 'yellowstone').ok, true);
+  assert.equal(state.stars, 0);
+  assert.equal(state.passport[0].cost, 500);
+  assert.equal(state.history[0].requestedPoints, -500);
+});
+
+test('prices up to 100000 persist for built-in and custom places, receipts, backups, and undo snapshots', () => {
+  const state = createInitialState();
+  const added = addDestination(state, familyDestination({ cost: 100000 }));
+  assert.equal(added.ok, true);
+  assert.equal(setDestinationCost(state, 'yellowstone', 100000).ok, true);
+  assert.equal(setDestinationCost(state, added.destination.id, 100000).ok, true);
+  for (let index = 0; index < 10; index++) adjustPoints(state, { amount: 10000, note: 'Parent-approved family goal bonus' });
+  assert.equal(visitDestination(state, added.destination.id).ok, true);
+  assert.equal(state.passport[0].cost, 100000);
+  assert.equal(state.stars, 0);
+  assert.equal(validateState(state), true);
+  const imported = importState(exportState(state));
+  assert.equal(imported.ok, true);
+  assert.deepEqual(imported.state.settings.destinationCosts, state.settings.destinationCosts);
+  assert.equal(imported.state.passport[0].cost, 100000);
+  let saved;
+  const storage = { getItem: () => saved, setItem: (key, value) => { saved = value; } };
+  saveState(state, storage);
+  assert.deepEqual(loadState(storage), state);
+  assert.equal(state.undo.settings.destinationCosts.yellowstone, 100000);
+  assert.equal(undoLastAction(state).ok, true);
+  assert.equal(state.stars, 100000);
+  assert.equal(state.settings.destinationCosts.yellowstone, 100000);
+});
+
+test('a price change never alters past trip costs or refunds stars and survives undo and a fresh start', () => {
+  const state = fixtureState();
+  setDestinationCost(state, 'reykjavik', 100);
+  visitDestination(state, 'reykjavik');
+  const balance = state.stars;
+  const stamp = JSON.stringify(state.passport[0]);
+  const purchaseHistory = JSON.stringify(state.history[0]);
+  assert.equal(setDestinationCost(state, 'reykjavik', 14000).ok, true);
+  assert.equal(state.stars, balance);
+  assert.equal(JSON.stringify(state.passport[0]), stamp);
+  assert.equal(JSON.stringify(state.history[0]), purchaseHistory);
+  assert.equal(state.passport[0].cost, 100);
+  assert.equal(undoLastAction(state).ok, true);
+  assert.equal(state.stars, 120);
+  assert.equal(state.passport.length, 0);
+  assert.equal(getDestinations(state).find(item => item.id === 'reykjavik').cost, 14000);
+  resetAdventure(state);
+  assert.equal(state.settings.destinationCosts.reykjavik, 14000);
+  assert.equal(state.stars, 0);
+});
+
+test('legacy adventures get the new default prices while custom prices and historical stamps stay intact', () => {
+  const state = fixtureState();
+  const { destination } = addDestination(state, familyDestination({ cost: 45 }));
+  setDestinationCost(state, 'yellowstone', 65);
+  visitDestination(state, 'yellowstone');
+  delete state.settings.destinationCosts;
+  delete state.undo.settings.destinationCosts;
+  assert.equal(validateState(state), true);
+  const { state: normalized } = normalizeAdventureState(state);
+  assert.deepEqual(normalized.settings.destinationCosts, {});
+  assert.deepEqual(normalized.undo.settings.destinationCosts, {});
+  assert.equal(getDestinations(normalized).find(item => item.id === 'yellowstone').cost, 6000);
+  assert.equal(getDestinations(normalized).find(item => item.id === destination.id).cost, 45);
+  assert.equal(normalized.passport[0].cost, 65);
+  assert.equal(normalized.stars, state.stars);
+});
+
+test('invalid or unknown destination prices cannot partially mutate the adventure or its undo', () => {
+  const state = fixtureState();
+  adjustPoints(state, { amount: 10, note: 'Real bonus' });
+  const before = JSON.stringify(state);
+  for (const cost of [0, -1, 1.5, 100001, Infinity, NaN, null, true, {}, '', 'not a number']) {
+    assert.equal(setDestinationCost(state, 'yellowstone', cost).ok, false, String(cost));
+    assert.equal(JSON.stringify(state), before);
+  }
+  assert.equal(setDestinationCost(state, 'not-registered', 100).ok, false);
+  for (const destinationCosts of [null, [], { unknown: 100 }, { yellowstone: -1 }, JSON.parse('{"__proto__":100}')]) {
+    assert.equal(updateSettings(state, { destinationCosts }).ok, false);
+    assert.equal(JSON.stringify(state), before);
+  }
+  assert.equal(updateSettings(state, { customDestinations: [{ ...familyDestination(), id: 'custom-temp' }], destinationCosts: { unknown: 10 } }).ok, false);
+  assert.equal(JSON.stringify(state), before);
+  const corrupt = JSON.parse(before);
+  corrupt.settings.destinationCosts = { unknown: 10 };
+  assert.equal(importState(corrupt).ok, false);
 });

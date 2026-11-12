@@ -5,7 +5,7 @@ const HISTORY_TYPES = new Set(['behavior', 'adjustment', 'reward', 'destination'
 const DEFAULT_REWARD_IDS = new Set(['movie-night', 'choose-dinner', 'ice-cream', 'extra-story', 'park-adventure', 'mystery-surprise']);
 const DESTINATION_IDS = new Set(['new-york', 'orlando', 'grand-canyon', 'san-francisco', 'yellowstone', 'chicago', 'washington', 'seattle', 'new-orleans', 'denver', 'paris', 'london', 'rome', 'cairo', 'tokyo', 'sydney', 'rio', 'cape-town', 'beijing', 'delhi', 'reykjavik', 'vancouver', 'turks-caicos', 'holmes-beach']);
 const STATE_KEYS = new Set(['version', 'demo', 'stars', 'settings', 'behaviors', 'history', 'passport', 'redemptions', 'undo']);
-const SETTINGS_KEYS = new Set(['childName', 'greenPoints', 'yellowPoints', 'redPoints', 'soundEnabled', 'goalRewardId', 'parentPin', 'customRewards', 'customDestinations']);
+const SETTINGS_KEYS = new Set(['childName', 'greenPoints', 'yellowPoints', 'redPoints', 'soundEnabled', 'goalRewardId', 'parentPin', 'customRewards', 'customDestinations', 'destinationCosts']);
 const BEHAVIOR_KEYS = new Set(['id', 'date', 'color', 'note', 'points', 'multiplier', 'streak', 'basePoints', 'requestedPoints']);
 const HISTORY_KEYS = new Set([...BEHAVIOR_KEYS, 'type', 'title', 'createdAt', 'emoji', 'rewardId', 'destinationId']);
 const REWARD_KEYS = new Set(['id', 'name', 'cost', 'emoji', 'description', 'color']);
@@ -23,7 +23,7 @@ const coordinate = (value, min, max) => typeof value === 'number' && Number.isFi
 function destination(value) {
   if (!keys(value, DESTINATION_KEYS) || !text(value.id, 100, 1) || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value.id)) return false;
   if (!text(value.name, 60, 1) || !value.name.trim() || !text(value.country, 80, 1) || !value.country.trim()) return false;
-  if (!text(value.emoji, 16, 1) || !value.emoji.trim() || !text(value.fact, 250, 1) || !value.fact.trim() || !integer(value.cost, 1, 10000)) return false;
+  if (!text(value.emoji, 16, 1) || !value.emoji.trim() || !text(value.fact, 250, 1) || !value.fact.trim() || !integer(value.cost, 1, 100000)) return false;
   if (!coordinate(value.lat, -90, 90) || !coordinate(value.lon, -180, 180) || !['us', 'world'].includes(value.region)) return false;
   if (value.region === 'us' && (value.lat < 24 || value.lat > 50 || value.lon < -125 || value.lon > -66)) return false;
   return (value.x === undefined || coordinate(value.x, 0, 100)) && (value.y === undefined || coordinate(value.y, 0, 100));
@@ -50,6 +50,13 @@ function settings(value) {
     for (const item of value.customDestinations) {
       if (!destination(item) || destinationIds.has(item.id)) return false;
       destinationIds.add(item.id);
+    }
+  }
+  if (value.destinationCosts !== undefined) {
+    if (!object(value.destinationCosts)) return false;
+    const destinationIds = new Set([...DESTINATION_IDS, ...(value.customDestinations || []).map(item => item.id)]);
+    for (const [destinationId, cost] of Object.entries(value.destinationCosts)) {
+      if (!destinationIds.has(destinationId) || !integer(cost, 1, 100000)) return false;
     }
   }
   if (value.customRewards === undefined) return true;
@@ -98,7 +105,7 @@ function snapshot(state, depth) {
   if (!state.history.every(item => history(item, destinationIds))) return false;
   const destinations = new Set();
   for (const entry of state.passport) {
-    if (!keys(entry, PASSPORT_KEYS) || !destinationIds.has(entry.destinationId) || destinations.has(entry.destinationId) || !date(entry.date) || !integer(entry.cost, 0, 10000)) return false;
+    if (!keys(entry, PASSPORT_KEYS) || !destinationIds.has(entry.destinationId) || destinations.has(entry.destinationId) || !date(entry.date) || !integer(entry.cost, 0, 100000)) return false;
     destinations.add(entry.destinationId);
   }
   for (const entry of state.redemptions) {

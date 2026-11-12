@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { configuration, normalizeFamilyCode, hashPassword, verifyPassword, createSession, verifySession, validateOrigin, validateState, handleRequest, normalizeCloudRow } from '../server/handler.js';
-import { createInitialState, addDestination, getDestinations, visitDestination, adjustPoints } from '../src/lib/model.js';
+import { createInitialState, addDestination, getDestinations, visitDestination, adjustPoints, setDestinationCost } from '../src/lib/model.js';
 import { fetchCloudState, saveCloudState, CloudError } from '../src/lib/cloud.js';
 import { GET as getStatus } from '../api/status.js';
 
@@ -272,4 +272,40 @@ test('the current controls header does not bypass family session authentication'
     oldUrl === undefined ? delete process.env.DATABASE_URL : process.env.DATABASE_URL = oldUrl;
     oldSecret === undefined ? delete process.env.SESSION_SECRET : process.env.SESSION_SECRET = oldSecret;
   }
+});
+
+test('100,000-star travel overrides and custom visit receipts survive Neon JSONB and cloud responses', async () => {
+  const state = createInitialState({ demo: false });
+  for (let i = 0; i < 10; i++) adjustPoints(state, { amount: 10_000, note: `Parent-approved long-term travel award ${i + 1}` });
+  const added = addDestination(state, { name: 'Our big family adventure', country: 'United States', emoji: '🚂', cost: 1500, lat: 40.7, lon: -74, region: 'us' });
+  assert.equal(added.ok, true);
+  assert.equal(setDestinationCost(state, 'yellowstone', 100_000).ok, true);
+  assert.equal(setDestinationCost(state, added.destination.id, 100_000).ok, true);
+  assert.equal(visitDestination(state, added.destination.id).ok, true);
+  assert.equal(state.stars, 0);
+  assert.equal(state.passport[0].cost, 100_000);
+  assert.doesNotThrow(() => validateState(state));
+
+  const originalFetch = globalThis.fetch;
+  try {
+    const reorder = value => Array.isArray(value) ? value.map(reorder) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, reorder(value[key])])) : value;
+    globalThis.fetch = async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(options.headers['X-Greenface-Controls'], 'pin-per-action-v1');
+      return Response.json({ state: reorder(body.state), revision: body.revision + 1, familyCode: 'HAPPY-FAMILY' });
+    };
+    const restored = await saveCloudState(state, 8);
+    assert.equal(restored.revision, 9);
+    assert.equal(restored.state.settings.destinationCosts.yellowstone, 100_000);
+    assert.equal(restored.state.settings.destinationCosts[added.destination.id], 100_000);
+    assert.equal(restored.state.passport[0].cost, 100_000);
+    assert.equal(getDestinations(restored.state).find(item => item.id === 'yellowstone').cost, 100_000);
+    assert.equal(getDestinations(restored.state).find(item => item.id === added.destination.id).cost, 100_000);
+
+    const invalid = JSON.parse(JSON.stringify(restored.state));
+    invalid.settings.destinationCosts.yellowstone = 100_001;
+    assert.throws(() => validateState(invalid));
+    globalThis.fetch = async () => Response.json({ state: invalid, revision: 9, familyCode: 'HAPPY-FAMILY' });
+    await assert.rejects(fetchCloudState(), error => error.code === 'INVALID_CLOUD_STATE');
+  } finally { globalThis.fetch = originalFetch; }
 });

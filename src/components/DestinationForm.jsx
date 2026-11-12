@@ -62,7 +62,7 @@ function PlacePicker({ region, location, onChange }) {
 export default function DestinationForm({ busy, initialRegion = 'us', onSubmit }) {
   const [name, setName] = useState('');
   const [country, setCountry] = useState(initialRegion === 'us' ? 'United States' : '');
-  const [cost, setCost] = useState('50');
+  const [cost, setCost] = useState('1000');
   const [emoji, setEmoji] = useState('🏖️');
   const [region, setRegion] = useState(initialRegion);
   const [location, setLocation] = useState(null);
@@ -119,7 +119,7 @@ export default function DestinationForm({ busy, initialRegion = 'us', onSubmit }
         <input value={country} onChange={event => setCountry(event.target.value)} maxLength={80} placeholder="e.g. Florida, USA" required/>
       </label>
       <label><span className="place-cost-label"><Star size={12}/> Star cost</span>
-        <input type="number" value={cost} onChange={event => setCost(event.target.value)} min="1" max="10000" step="1" required/>
+        <input type="number" value={cost} onChange={event => setCost(event.target.value)} min="1" max="100000" step="1" required/>
       </label>
     </div>
 

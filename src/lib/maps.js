@@ -144,7 +144,7 @@ export function renderAdventureMap({ region = 'us', destinations = [], visited =
     const fullName = String(destination.name || destination.shortName || 'Your place');
     const dx = mx - x, dy = my - y;
     const labelY = circle + 21;
-    const costLabel = isVisited ? 'Visited ✓' : `${destination.cost} ★`;
+    const costLabel = isVisited ? 'Visited ✓' : `${Number(destination.cost).toLocaleString('en-US')} ★`;
     return `<g class="adventure-map-marker${compact ? ' is-compact' : ''}${isVisited ? ' is-visited' : ''}${canAfford ? ' is-affordable' : ''}" data-destination="${escape(destination.id)}" role="button" tabindex="0" aria-label="${escape(fullName)}. ${isVisited ? 'Already visited.' : `Visit for ${destination.cost} stars.`}" transform="translate(${mx.toFixed(1)} ${my.toFixed(1)})" style="cursor:pointer;outline:none">
       <title>${escape(fullName)} · ${escape(costLabel)}</title>
       ${dx || dy ? `<g pointer-events="none" aria-hidden="true"><path d="M${-dx} ${-dy}Q${-dx * .55 + dy * .12} ${-dy * .55 - dx * .12} 0 0" fill="none" stroke="#65916c" stroke-width="1.35" stroke-linecap="round" opacity=".85"/><circle cx="${-dx}" cy="${-dy}" r="4.2" fill="#4f7a50" stroke="#fffdf6" stroke-width="1.7"/></g>` : ''}

@@ -46,6 +46,12 @@ Choose **Adventure map → Add a place** (or **Grown-up zone → Add a place**) 
 
 Custom places appear on the map and in the destination cards. They use the same parent-approved star spending and passport stamps as built-in places. Family cloud, local storage, and backups preserve them. Adding a place doesn't spend stars. Existing adventures and backups continue to work. Turks & Caicos and Holmes Beach, Florida are also included as built-in destinations.
 
+## Destination prices
+
+Everyday treats and travel have different scales: ice cream remains 30 stars; Holmes Beach starts at 1,500, Yellowstone at 6,000, and international trips range into the tens of thousands. These are adjustable family goals, not monetary quotes or travel bookings.
+
+Open **Grown-up zone → Place prices**, choose any destination, and set its cost. You can also choose **Set this place’s star price** inside a destination. Each change requires a fresh PIN approval. Custom places support costs up to 100,000 stars. Changes apply to future unlocks and preserve existing stars and passport receipts.
+
 ## Reset faces and unapproved trips
 
 Open **Grown-up zone → Reset progress**. **Reset all faces** clears every school grade and streak and recalculates stars without awarding or refunding stars. It preserves the passport and redeemed rewards. **Clear faces, stars & trips** also empties the star jar, passport, redeemed rewards, and progress history. Both keep the child's name, point settings, rewards menu, and custom destinations. Confirm your selection and enter your PIN to apply it.
